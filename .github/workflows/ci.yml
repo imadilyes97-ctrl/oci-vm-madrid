@@ -1,4 +1,4 @@
-name: Create VM Madrid
+name: CI
 on:
   schedule:
     - cron: '*/5 * * * *'  # Toutes les 5 minutes
