@@ -1,0 +1,49 @@
+name: Create VM Madrid
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # Toutes les 5 minutes
+  workflow_dispatch:        # Lancement manuel
+    inputs:
+      force:
+        description: 'Force restart'
+        required: false
+        default: 'false'
+
+# Annuler les runs précédents quand un nouveau démarre
+concurrency:
+  group: oci-vm-create
+  cancel-in-progress: true
+
+jobs:
+  create-vm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8  # Max 8 min par run (GitHub limit: 6h)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install OCI SDK
+        run: pip install oci
+
+      - name: Create VM
+        env:
+          OCI_TENANCY: ${{ secrets.OCI_TENANCY }}
+          OCI_USER: ${{ secrets.OCI_USER }}
+          OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
+          OCI_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+          OCI_REGION: eu-madrid-1
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python3 create-vm.py
+
+      - name: Notify on failure (optional)
+        if: failure()
+        run: |
+          if [ -n "$NTFY_TOPIC" ]; then
+            curl -s -d "VM Madrid: tentative echouee (see logs)" \
+              "https://ntfy.sh/${NTFY_TOPIC}" || true
+          fi
