@@ -3,21 +3,13 @@ on:
   schedule:
     - cron: '*/5 * * * *'  # Toutes les 5 minutes
   workflow_dispatch:        # Lancement manuel
-    inputs:
-      force:
-        description: 'Force restart'
-        required: false
-        default: 'false'
 
-# Annuler les runs précédents quand un nouveau démarre
-concurrency:
-  group: oci-vm-create
-  cancel-in-progress: true
-
+# PAS de concurrency cancel-in-progress — c'est ce qui tuait les runs !
+# Le script a deja sa propre protection anti-suspension (1 tentative/run, circuit breaker)
 jobs:
   create-vm:
     runs-on: ubuntu-latest
-    timeout-minutes: 8  # Max 8 min par run (GitHub limit: 6h)
+    timeout-minutes: 8
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,6 +31,15 @@ jobs:
           OCI_REGION: eu-madrid-1
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: python3 create-vm.py
+
+      - name: Log run info
+        if: always()
+        run: |
+          echo "=== RUN INFO ==="
+          echo "Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Event: ${{ github.event_name }}"
+          echo "Run ID: ${{ github.run_id }}"
+          echo "Run number: ${{ github.run_number }}"
 
       - name: Notify on failure (optional)
         if: failure()
