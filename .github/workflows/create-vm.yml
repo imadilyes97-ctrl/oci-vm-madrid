@@ -1,7 +1,7 @@
 name: Create VM Madrid
 on:
   schedule:
-    - cron: '*/1 * * * *'  # Toutes les 5 minutes
+    - cron: '*/5 * * * *'  # Toutes les 5 minutes
   workflow_dispatch:        # Lancement manuel
 
 # PAS de concurrency cancel-in-progress — c'est ce qui tuait les runs !
