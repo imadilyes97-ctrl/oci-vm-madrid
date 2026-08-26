@@ -2,7 +2,9 @@ name: Create VM Madrid
 on:
   schedule:
     - cron: '*/5 * * * *'  # Toutes les 5 minutes
-  workflow_dispatch:        # Lancement manuel
+  workflow_dispatch:
+  repository_dispatch:
+    types: [trigger-vm]        # Lancement manuel
 
 # PAS de concurrency cancel-in-progress — c'est ce qui tuait les runs !
 # Le script a deja sa propre protection anti-suspension (1 tentative/run, circuit breaker)
