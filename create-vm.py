@@ -316,26 +316,25 @@ Tentatives: {state["attempts"]}
         notify(msg)
         log('=== SUCCES ===')
 
-    except oci.exceptions.OutofHostCapacityError:
-        log('  Out of host capacity (normal Always Free)')
-        state['last_error'] = 'Out of host capacity'
-        save_state(state)
-        # Pas d'erreur fatale - le schedule va retry
-
-    except oci.exceptions.TooManyRequestsError:
-        log('  Rate limited (429) - prochain run dans 5 min')
-        state['last_error'] = 'Rate limited 429'
-        save_state(state)
-
-    except oci.exceptions.ConnectTimeout:
-        log('  Timeout reseau - prochain run dans 5 min')
-        state['last_error'] = 'ConnectTimeout'
-        save_state(state)
-
     except Exception as e:
-        err = str(e)[:200]
-        log(f'  Erreur: {err}')
-        state['last_error'] = err
+        err = str(e)[:300]
+        if 'Out of host capacity' in err:
+            log('  Out of host capacity (normal Always Free)')
+            state['last_error'] = 'Out of host capacity'
+        elif 'TooManyRequests' in err or '429' in err:
+            log('  Rate limited (429) - prochain run dans 5 min')
+            state['last_error'] = 'Rate limited 429'
+        elif 'Invalid ssh public key' in err:
+            log(f'  SSH key error: {err}')
+            state['last_error'] = f'SSH key: {err}'
+            save_state(state)
+            sys.exit(1)
+        elif 'ConnectTimeout' in err or 'timed out' in err:
+            log('  Timeout reseau - prochain run dans 5 min')
+            state['last_error'] = 'ConnectTimeout'
+        else:
+            log(f'  Erreur: {err}')
+            state['last_error'] = err
         save_state(state)
 
     # Cleanup
