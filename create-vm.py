@@ -80,6 +80,9 @@ def notify(msg):
 # MAIN
 # ============================================================
 def main():
+    # TEST NTFY TEMPORAIRE (a retirer) — verifie la chaine ntfy de bout en bout
+    notify('TEST JARVIS VM - si tu recois ceci, la notif marche!')
+    log('TEST NTFY envoye ci-dessus')
     state = load_state()
 
     # Vérifier max tentatives
