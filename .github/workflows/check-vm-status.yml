@@ -63,16 +63,22 @@ jobs:
           "
 
       - name: Commit status JSON
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Configure git pour pouvoir pusher (actions/checkout met origin en read-only)
           git config user.name "jarvis-status-bot"
           git config user.email "jarvis@users.noreply.github.com"
+          # Réécrire origin avec le token GITHUB_TOKEN pour autoriser le push
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
           git add vm-status.json
           if git diff --staged --quiet; then
-            echo "Aucun changement dans vm-status.json — skip commit"
+            echo "Aucun changement dans vm-status.json"
           else
             git commit -m "check: VM status update $(date -u +%FT%TZ)"
+            # Rebase sur master (au cas où d'autres commits sont passés)
             git pull --rebase --autostash origin master || true
-            git push
+            git push origin HEAD:master
           fi
 
       - name: Notify ntfy if VM is RUNNING
