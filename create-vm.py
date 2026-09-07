@@ -32,7 +32,8 @@ FINGERPRINT = os.environ.get('OCI_FINGERPRINT', '')
 PRIVATE_KEY = os.environ.get('OCI_KEY', '')
 REGION = os.environ.get('OCI_REGION', 'eu-madrid-1')
 NTFY_TOPIC = os.environ.get('NTFY_TOPIC', '')
-AD = 'VnBa:EU-MADRID-1-AD-1'
+AD = 'VnBa:EU-MADRID-1-AD-1'  # fallback si list_availability_domains échoue
+ADS = []  # rempli dynamiquement: toutes les ADs de la région
 VM_NAME = 'jarvis-madrid'
 SHAPE = 'VM.Standard.A1.Flex'
 OCPU = 2
@@ -80,9 +81,6 @@ def notify(msg):
 # MAIN
 # ============================================================
 def main():
-    # TEST NTFY TEMPORAIRE (a retirer) — verifie la chaine ntfy de bout en bout
-    notify('TEST JARVIS VM - si tu recois ceci, la notif marche!')
-    log('TEST NTFY envoye ci-dessus')
     state = load_state()
 
     # Vérifier max tentatives
@@ -121,6 +119,16 @@ def main():
 
     compute = oci.core.ComputeClient(oci_config)
     network = oci.core.VirtualNetworkClient(oci_config)
+    identity = oci.identity.IdentityClient(oci_config)
+
+    # Récupérer TOUTES les ADs de la région (meilleures chances de capacité)
+    global ADS
+    try:
+        ADS = [ad.name for ad in identity.list_availability_domains(TENANCY).data]
+        log(f'  {len(ADS)} AD(s) trouvee(s): {ADS}')
+    except Exception as e:
+        log(f'  list_availability_domains erreur: {e} — fallback sur {AD}')
+        ADS = [AD]
 
     try:
         # 1. Vérifier/créer ressources réseau
@@ -227,30 +235,49 @@ def main():
             img = images.data[0]
         log(f'  Image: {img.display_name}')
 
-        # 3. Lancer la VM
-        log('Lancement VM A1.Flex 2OCPU/12GB...')
-        vm = compute.launch_instance(oci.core.models.LaunchInstanceDetails(
-            compartment_id=TENANCY,
-            availability_domain=AD,
-            display_name=VM_NAME,
-            shape=SHAPE,
-            shape_config=oci.core.models.LaunchInstanceShapeConfigDetails(
-                ocpus=OCPU, memory_in_gbs=RAM_GB
-            ),
-            source_details=oci.core.models.InstanceSourceViaImageDetails(
-                source_type='image', image_id=img.id,
-                boot_volume_size_in_gbs=BOOT_GB
-            ),
-            create_vnic_details=oci.core.models.CreateVnicDetails(
-                subnet_id=sub.id, assign_public_ip=True,
-                display_name='jarvis-vnic'
-            ),
-            metadata={'ssh_authorized_keys': SSH_PUB},
-            agent_config=oci.core.models.LaunchInstanceAgentConfigDetails(
-                is_monitoring_disabled=False, is_management_disabled=False
-            )
-        )).data
+        # 3. Lancer la VM — essayer chaque AD jusqu'à succès
+        vm = None
+        ad_used = None
+        last_err = None
+        for ad_try in ADS:
+            log(f'Lancement VM A1.Flex {OCPU}OCPU/{RAM_GB}GB sur {ad_try}...')
+            try:
+                vm = compute.launch_instance(oci.core.models.LaunchInstanceDetails(
+                    compartment_id=TENANCY,
+                    availability_domain=ad_try,
+                    display_name=VM_NAME,
+                    shape=SHAPE,
+                    shape_config=oci.core.models.LaunchInstanceShapeConfigDetails(
+                        ocpus=OCPU, memory_in_gbs=RAM_GB
+                    ),
+                    source_details=oci.core.models.InstanceSourceViaImageDetails(
+                        source_type='image', image_id=img.id,
+                        boot_volume_size_in_gbs=BOOT_GB
+                    ),
+                    create_vnic_details=oci.core.models.CreateVnicDetails(
+                        subnet_id=sub.id, assign_public_ip=True,
+                        display_name='jarvis-vnic'
+                    ),
+                    metadata={'ssh_authorized_keys': SSH_PUB},
+                    agent_config=oci.core.models.LaunchInstanceAgentConfigDetails(
+                        is_monitoring_disabled=False, is_management_disabled=False
+                    )
+                )).data
+                ad_used = ad_try
+                log(f'  ✅ Succès sur {ad_try}')
+                break
+            except Exception as e:
+                err = str(e)[:200]
+                last_err = err
+                if 'Out of host capacity' in err:
+                    log(f'  → {ad_try}: Out of host capacity, j essaie la suivante')
+                else:
+                    log(f'  → {ad_try}: erreur {err[:80]}, j essaie la suivante')
 
+        if vm is None:
+            raise Exception(f'Toutes les ADs ont refuse: {last_err}')
+
+        AD = ad_used  # pour la suite (block volume dans la même AD)
         log(f'  VM lancee: {vm.id}')
         log(f'  State: {vm.lifecycle_state}')
 
