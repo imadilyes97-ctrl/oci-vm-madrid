@@ -42,23 +42,49 @@ jobs:
           STATUS_OUTPUT=vm-status.json python3 check-vm-status.py
         continue-on-error: true
 
+      - name: Show generated status
+        if: always()
+        run: |
+          echo "=== vm-status.json ==="
+          cat vm-status.json || echo "(non genere)"
+          echo "=== Extrait ==="
+          python3 -c "
+          import json
+          try:
+              d = json.load(open('vm-status.json'))
+              print(f\"  user: {d.get('summary',{}).get('user')}\")
+              print(f\"  instances: {d.get('summary',{}).get('instance_count',0)}\")
+              print(f\"  running: {d.get('summary',{}).get('running_count',0)}\")
+              print(f\"  vm_madrid_exists: {d.get('summary',{}).get('vm_madrid_exists')}\")
+              for i in d.get('instances', []):
+                  print(f\"    - {i.get('display_name')} | {i.get('lifecycle_state')} | IP={i.get('public_ip','?')}\")
+          except Exception as e:
+              print(f'erreur lecture: {e}')
+          "
+
       - name: Commit status JSON
         run: |
           git config user.name "jarvis-status-bot"
           git config user.email "jarvis@users.noreply.github.com"
           git add vm-status.json
-          git diff --staged --quiet || git commit -m "check: VM status update $(date -u +%FT%TZ)"
-          git push
+          if git diff --staged --quiet; then
+            echo "Aucun changement dans vm-status.json — skip commit"
+          else
+            git commit -m "check: VM status update $(date -u +%FT%TZ)"
+            git pull --rebase --autostash origin master || true
+            git push
+          fi
 
       - name: Notify ntfy if VM is RUNNING
-        if: steps.check.outputs.status_code == '0'
+        if: hashFiles('vm-status.json') != ''
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: |
-          if [ -n "$NTFY_TOPIC" ]; then
-            IP=$(python3 -c "import json; d=json.load(open('vm-status.json')); ms=[i for i in d['instances'] if i['display_name']=='jarvis-madrid' and i.get('public_ip')]; print(ms[0]['public_ip'] if ms else 'NO_IP')")
-            curl -s -H "Title: VM Madrid ✅ RUNNING" \
-              -d "VM Madrid créée et accessible. IP: $IP" \
+          EXISTS=$(python3 -c "import json; print(json.load(open('vm-status.json')).get('summary',{}).get('vm_madrid_exists', False))")
+          if [ "$EXISTS" = "True" ] && [ -n "$NTFY_TOPIC" ]; then
+            IP=$(python3 -c "import json; d=json.load(open('vm-status.json')); ms=[i for i in d.get('instances',[]) if i.get('display_name')=='jarvis-madrid' and i.get('public_ip')]; print(ms[0]['public_ip'] if ms else 'NO_IP')")
+            curl -s -H "Title: VM Madrid RUNNING" \
+              -d "VM Madrid creee et accessible. IP: $IP" \
               "https://ntfy.sh/${NTFY_TOPIC}"
           fi
         continue-on-error: true
