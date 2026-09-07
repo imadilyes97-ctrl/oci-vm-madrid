@@ -1,0 +1,64 @@
+name: Check VM Madrid Status
+
+on:
+  # Toutes les 10 minutes — vérifie l'état des VMs sans rien créer
+  schedule:
+    - cron: '*/10 * * * *'
+  # Lancement manuel depuis l'UI GitHub Actions
+  workflow_dispatch:
+  # Déclenché par le .bat local (repository_dispatch)
+  repository_dispatch:
+    types: [check-vm]
+
+permissions:
+  contents: write  # pour commit vm-status.json
+
+jobs:
+  check-status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install OCI SDK
+        run: pip install oci
+
+      - name: Check VM status
+        id: check
+        env:
+          OCI_TENANCY: ${{ secrets.OCI_TENANCY }}
+          OCI_USER: ${{ secrets.OCI_USER }}
+          OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+          OCI_REGION: eu-madrid-1
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          STATUS_OUTPUT=vm-status.json python3 check-vm-status.py
+        continue-on-error: true
+
+      - name: Commit status JSON
+        run: |
+          git config user.name "jarvis-status-bot"
+          git config user.email "jarvis@users.noreply.github.com"
+          git add vm-status.json
+          git diff --staged --quiet || git commit -m "check: VM status update $(date -u +%FT%TZ)"
+          git push
+
+      - name: Notify ntfy if VM is RUNNING
+        if: steps.check.outputs.status_code == '0'
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          if [ -n "$NTFY_TOPIC" ]; then
+            IP=$(python3 -c "import json; d=json.load(open('vm-status.json')); ms=[i for i in d['instances'] if i['display_name']=='jarvis-madrid' and i.get('public_ip')]; print(ms[0]['public_ip'] if ms else 'NO_IP')")
+            curl -s -H "Title: VM Madrid ✅ RUNNING" \
+              -d "VM Madrid créée et accessible. IP: $IP" \
+              "https://ntfy.sh/${NTFY_TOPIC}"
+          fi
+        continue-on-error: true
