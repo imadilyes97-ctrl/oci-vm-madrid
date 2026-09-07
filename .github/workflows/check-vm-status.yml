@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write  # pour commit vm-status.json
+  actions: read
 
 jobs:
   check-status:
@@ -45,22 +46,44 @@ jobs:
       - name: Show generated status
         if: always()
         run: |
-          echo "=== vm-status.json ==="
-          cat vm-status.json || echo "(non genere)"
-          echo "=== Extrait ==="
-          python3 -c "
+          echo "=== vm-status.json (extrait) ==="
+          if [ -f vm-status.json ]; then
+            cat vm-status.json
+            echo ""
+            echo "=== Resume ==="
+            python3 -c "
           import json
           try:
               d = json.load(open('vm-status.json'))
-              print(f\"  user: {d.get('summary',{}).get('user')}\")
-              print(f\"  instances: {d.get('summary',{}).get('instance_count',0)}\")
-              print(f\"  running: {d.get('summary',{}).get('running_count',0)}\")
-              print(f\"  vm_madrid_exists: {d.get('summary',{}).get('vm_madrid_exists')}\")
+              print(f\"user: {d.get('summary',{}).get('user')}\")
+              print(f\"user_email: {d.get('summary',{}).get('user_email')}\")
+              print(f\"region: {d.get('region')}\")
+              print(f\"instances: {d.get('summary',{}).get('instance_count',0)}\")
+              print(f\"running: {d.get('summary',{}).get('running_count',0)}\")
+              print(f\"vm_madrid_exists: {d.get('summary',{}).get('vm_madrid_exists')}\")
               for i in d.get('instances', []):
-                  print(f\"    - {i.get('display_name')} | {i.get('lifecycle_state')} | IP={i.get('public_ip','?')}\")
+                  print(f\"  - {i.get('display_name')} | {i.get('lifecycle_state')} | AD={i.get('availability_domain')} | IP={i.get('public_ip','?')}\")
+              for v in d.get('volumes', []):
+                  print(f\"  vol: {v.get('display_name')} | {v.get('size_gb')}GB | {v.get('lifecycle_state')}\")
+              if d.get('errors'):
+                  print('ERREURS:')
+                  for e in d['errors']:
+                      print(f'  - {e[:120]}')
           except Exception as e:
               print(f'erreur lecture: {e}')
           "
+          else
+            echo "(vm-status.json non genere)"
+          fi
+
+      - name: Upload status as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vm-status
+          path: vm-status.json
+          retention-days: 7
+        continue-on-error: true
 
       - name: Commit status JSON
         env:
