@@ -85,35 +85,26 @@ jobs:
           retention-days: 7
         continue-on-error: true
 
-      - name: Commit status JSON
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Configure git pour pouvoir pusher (actions/checkout met origin en read-only)
-          git config user.name "jarvis-status-bot"
-          git config user.email "jarvis@users.noreply.github.com"
-          # Réécrire origin avec le token GITHUB_TOKEN pour autoriser le push
-          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
-          git add vm-status.json
-          if git diff --staged --quiet; then
-            echo "Aucun changement dans vm-status.json"
-          else
-            git commit -m "check: VM status update $(date -u +%FT%TZ)"
-            # Rebase sur master (au cas où d'autres commits sont passés)
-            git pull --rebase --autostash origin master || true
-            git push origin HEAD:master
-          fi
+      # Pas de commit du JSON dans le repo : 144 commits/jour = pollution.
+      # Le statut est visible dans le log "Show generated status" + artifact "vm-status".
 
       - name: Notify ntfy if VM is RUNNING
-        if: hashFiles('vm-status.json') != ''
+        if: always()
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: |
+          if [ ! -f vm-status.json ]; then
+            echo "vm-status.json absent, pas de notif"
+            exit 0
+          fi
           EXISTS=$(python3 -c "import json; print(json.load(open('vm-status.json')).get('summary',{}).get('vm_madrid_exists', False))")
           if [ "$EXISTS" = "True" ] && [ -n "$NTFY_TOPIC" ]; then
             IP=$(python3 -c "import json; d=json.load(open('vm-status.json')); ms=[i for i in d.get('instances',[]) if i.get('display_name')=='jarvis-madrid' and i.get('public_ip')]; print(ms[0]['public_ip'] if ms else 'NO_IP')")
             curl -s -H "Title: VM Madrid RUNNING" \
               -d "VM Madrid creee et accessible. IP: $IP" \
               "https://ntfy.sh/${NTFY_TOPIC}"
+            echo "Notif envoyee"
+          else
+            echo "VM pas encore creee, pas de notif"
           fi
         continue-on-error: true
